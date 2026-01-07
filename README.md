@@ -1,4 +1,4 @@
-## FileOrg (MVP)
+## FileOrg
 
 Local-first file indexer + semantic search for macOS.
 
@@ -18,28 +18,6 @@ Local-first file indexer + semantic search for macOS.
 python -m venv venv
 source venv/bin/activate
 pip install -e .
-```
-
-2. Install CLIP dependencies (required for image indexing):
-
-```bash
-pip install torch open_clip_torch
-```
-
-3. (One-time) Let SentenceTransformers download the text embedding model (offline after first pull):
-
-```python
-python - <<'PY'
-from sentence_transformers import SentenceTransformer
-SentenceTransformer("BAAI/bge-base-en-v1.5")
-print("Model downloaded.")
-PY
-```
-
-4. (Optional) Ensure `hdbscan` is installed for semantic folder suggestions (pulled via `pip install -e .`):
-
-```bash
-pip install hdbscan
 ```
 
 ### Configure
@@ -128,10 +106,7 @@ The “suggest structure” tool clusters embeddings (text + images) with HDBSCA
 
 ### Troubleshooting
 
-- If `fileorg index` fails with a CLIP error, install deps:
-  `pip install torch open_clip_torch`
 - If embeddings fail, ensure the HuggingFace model downloaded successfully
   (`SentenceTransformer("BAAI/bge-base-en-v1.5")`).
-- If structure suggestions fail, install `hdbscan` and re-run indexing if needed.
 - If `pip install -e .` fails on Pillow with Python 3.13, upgrade Pillow
   (already loosened to `pillow>=10.3.0`) or use Python 3.12.
