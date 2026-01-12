@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+import threading
+import time
+from typing import Any, Callable
 
 from openai import OpenAI
 from rich.console import Console
 from rich.panel import Panel
-from rich.markdown import Markdown
 import typer
 
 from fileorg.config import load_config
+from fileorg.embeddings import build_text_embedder
 from fileorg.chat.tools import (
     ToolResult,
     tool_definitions,
@@ -22,6 +24,31 @@ from fileorg.chat.tools import (
 from fileorg.store import ChromaStore, MetadataStore
 
 console = Console()
+_STATUS_UPDATE_INTERVAL = 0.2
+
+
+def _run_with_timer(label: str, fn: Callable[[], Any]) -> tuple[Any, float]:
+    """Show a live timer while running a blocking call."""
+    start = time.perf_counter()
+    stop_event = threading.Event()
+    status = console.status("")
+
+    def updater() -> None:
+        while not stop_event.wait(_STATUS_UPDATE_INTERVAL):
+            elapsed = time.perf_counter() - start
+            status.update(f"[cyan]{label} {int(elapsed)}s[/cyan]")
+
+    with status:
+        status.update(f"[cyan]{label} 0s[/cyan]")
+        thread = threading.Thread(target=updater, daemon=True)
+        thread.start()
+        try:
+            result = fn()
+        finally:
+            stop_event.set()
+            thread.join()
+    elapsed = time.perf_counter() - start
+    return result, elapsed
 
 
 def _handle_tool_call(name: str, args: dict[str, Any], deps: dict) -> ToolResult:
@@ -40,6 +67,7 @@ def _handle_tool_call(name: str, args: dict[str, Any], deps: dict) -> ToolResult
         return tool_suggest_structure(
             chroma=deps["chroma"],
             client=deps["client"],
+            config=deps["config"],
             min_cluster_size=int(args.get("min_cluster_size", 3)),
             min_samples=int(args.get("min_samples", 2)),
         )
@@ -54,24 +82,75 @@ def chat_loop() -> None:
     client = OpenAI()
     chroma = ChromaStore(config.chroma_dir())
     metadata = MetadataStore(config.metadata_db_path())
-    text_embedder = None
+    text_embedder, _ = _run_with_timer(
+        "Loading text embedder…", lambda: build_text_embedder(config)
+    )
 
-    def get_text_embedder():
-        nonlocal text_embedder
-        if text_embedder is None:
-            # Lazy load to avoid startup lag; first call may take a few seconds.
-            console.print(
-                "[yellow]Loading text embedding model (first time may take a few seconds)...[/yellow]"
-            )
-            from fileorg.embeddings import build_text_embedder
+    def limited_messages(
+        max_chars: int = 12000, max_messages: int = 18
+    ) -> list[dict[str, Any]]:
+        if not messages:
+            return []
+        system = messages[0]
+        keep_indices: list[int] = []
+        total_chars = len(str(system.get("content", "")))
+        idx = len(messages) - 1
 
-            text_embedder = build_text_embedder(config)
-        return text_embedder
+        def _tool_call_id(tc: Any) -> str | None:
+            if isinstance(tc, dict):
+                return tc.get("id") or tc.get("tool_call_id")
+            return getattr(tc, "id", None)
+
+        while idx >= 1:
+            msg = messages[idx]
+            role = msg.get("role")
+            msg_len = len(str(msg.get("content", "")))
+
+            if role == "tool":
+                tool_id = msg.get("tool_call_id")
+                parent_idx = None
+                for j in range(idx - 1, 0, -1):
+                    prev = messages[j]
+                    if prev.get("role") == "assistant" and prev.get("tool_calls"):
+                        if any(_tool_call_id(tc) == tool_id for tc in prev.get("tool_calls")):
+                            parent_idx = j
+                            break
+                if parent_idx is None:
+                    idx -= 1
+                    continue
+
+                pair_len = msg_len
+                if parent_idx not in keep_indices:
+                    pair_len += len(str(messages[parent_idx].get("content", "")))
+                if (
+                    len(keep_indices) + (2 if parent_idx not in keep_indices else 1)
+                    > max_messages
+                    or total_chars + pair_len > max_chars
+                ):
+                    break
+
+                if parent_idx not in keep_indices:
+                    keep_indices.append(parent_idx)
+                    total_chars += len(str(messages[parent_idx].get("content", "")))
+                keep_indices.append(idx)
+                total_chars += msg_len
+                idx = parent_idx - 1
+                continue
+
+            if len(keep_indices) + 1 > max_messages or total_chars + msg_len > max_chars:
+                break
+            keep_indices.append(idx)
+            total_chars += msg_len
+            idx -= 1
+
+        keep_indices_sorted = sorted(set(keep_indices))
+        return [system] + [messages[i] for i in keep_indices_sorted]
 
     system_prompt = (
         "You are FileOrg, a local file organization assistant. "
-        "Use tools to search files, find duplicates, find stale files, suggest folder structures, "
-        "and preview move plans. Never delete files. Default to dry-run/preview."
+        "Use tools to search files, find duplicates, find stale files, and organize files. "
+        "For any request to organize/restructure/move files, always return a preview move plan and tree (dry-run only), "
+        "using suggest_structure or preview_moves as appropriate. Never delete or actually move files."
     )
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
@@ -85,7 +164,7 @@ def chat_loop() -> None:
 
     while True:
         try:
-            user_input = console.input("[bold green]you › [/bold green]")
+            user_input = console.input("[bold green]> [/bold green]")
         except (EOFError, KeyboardInterrupt):
             console.print("\nGoodbye.")
             break
@@ -93,14 +172,18 @@ def chat_loop() -> None:
         if user_input.strip().lower() in {"exit", "quit"}:
             console.print("Goodbye.")
             break
+        if not user_input.strip():
+            continue
         messages.append({"role": "user", "content": user_input})
 
-        with console.status("[cyan]fileorg is thinking…[/cyan]"):
-            response = client.chat.completions.create(
+        response, _ = _run_with_timer(
+            "Thinking…",
+            lambda: client.chat.completions.create(
                 model="gpt-4o",
-                messages=messages,
+                messages=limited_messages(),
                 tools=tool_definitions(),
-            )
+            ),
+        )
         message = response.choices[0].message
         tool_calls = message.tool_calls or []
 
@@ -121,8 +204,9 @@ def chat_loop() -> None:
                     deps={
                         "chroma": chroma,
                         "metadata": metadata,
-                        "text_embedder": get_text_embedder(),
+                        "text_embedder": text_embedder,
                         "client": client,
+                        "config": config,
                     },
                 )
                 messages.append(
@@ -133,12 +217,14 @@ def chat_loop() -> None:
                         "content": result.content,
                     }
                 )
-            with console.status("[cyan]fileorg is thinking…[/cyan]"):
-                response = client.chat.completions.create(
-                    model="gpt-4o", messages=messages, tools=tool_definitions()
-                )
+            response, _ = _run_with_timer(
+                "Thinking…",
+                lambda: client.chat.completions.create(
+                    model="gpt-4o", messages=limited_messages(), tools=tool_definitions()
+                ),
+            )
             message = response.choices[0].message
 
         if message.content:
-            console.print(Panel(Markdown(message.content), title="fileorg", border_style="cyan"))
+            console.print(f"[pink]  •[/pink] [bright_black]{message.content}[/]")
             messages.append({"role": "assistant", "content": message.content})
