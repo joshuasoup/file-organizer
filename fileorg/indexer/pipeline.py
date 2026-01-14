@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -15,7 +15,11 @@ from fileorg.indexer.extract import (
     extract_text,
     load_image,
 )
-from fileorg.indexer.scan import scan_files
+from fileorg.indexer.scan import (
+    DEFAULT_ORGANIZED_SCORE_THRESHOLD,
+    FolderAssessment,
+    scan_files,
+)
 from fileorg.indexer.types import FileInfo, FileType
 from fileorg.store import ChromaStore, MetadataStore
 from fileorg.utils import hash_file
@@ -30,6 +34,8 @@ class IndexStats:
     failed: int = 0
     removed: int = 0
     current: str | None = None
+    organized_dirs: list[FolderAssessment] = field(default_factory=list)
+    needs_attention_dirs: list[FolderAssessment] = field(default_factory=list)
 
 
 ProgressCallback = Callable[[IndexStats], None]
@@ -61,7 +67,24 @@ class Indexer:
             self._metadata.clear()
             self._chroma.clear()
 
-        iterable = files if files is not None else scan_files(self._config)
+        organized_dirs: list[FolderAssessment] = []
+        needs_attention_dirs: list[FolderAssessment] = []
+
+        def _record_assessment(assessment: FolderAssessment, status: str) -> None:
+            if status == "organized":
+                organized_dirs.append(assessment)
+            else:
+                needs_attention_dirs.append(assessment)
+
+        iterable = (
+            files
+            if files is not None
+            else scan_files(
+                self._config,
+                organized_threshold=DEFAULT_ORGANIZED_SCORE_THRESHOLD,
+                on_directory=_record_assessment,
+            )
+        )
         if files is not None:
             try:
                 stats.total = len(files)
@@ -70,6 +93,8 @@ class Indexer:
 
         scanned_paths: set[str] = set()
         for info in iterable:
+            if info is None:
+                continue
             stats.scanned += 1
             path_str = str(info.path)
             stats.current = path_str
@@ -91,6 +116,8 @@ class Indexer:
 
         stats.removed = self._prune_missing(scanned_paths)
         stats.current = None
+        stats.organized_dirs = organized_dirs
+        stats.needs_attention_dirs = needs_attention_dirs
         if progress:
             progress(stats)
         return stats

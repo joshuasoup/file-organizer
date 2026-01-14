@@ -17,3 +17,5 @@ fileorg.egg-info/
 .envrc
 :memory:
 .direnv
+.sandbox_fileorg/
+scripts/

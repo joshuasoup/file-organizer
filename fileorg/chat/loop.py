@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from typing import Any, Callable
@@ -11,20 +12,30 @@ from rich.panel import Panel
 import typer
 
 from fileorg.config import load_config
-from fileorg.embeddings import build_text_embedder
+from fileorg.embeddings import build_text_embedder, build_image_embedder
 from fileorg.chat.tools import (
     ToolResult,
     tool_definitions,
     tool_duplicates,
+    tool_delete,
+    tool_move,
     tool_preview_moves,
     tool_search,
-    tool_stale,
     tool_suggest_structure,
 )
+from fileorg.chat.tools.plan_ops import build_move_plan, parse_structure_suggestions
+from fileorg.chat.tools.previews import (
+    display_delete_preview,
+    display_move_preview,
+    display_structure_tree,
+)
+from fileorg.chat.system_prompt import get_system_prompt
+from fileorg.indexer import Indexer
 from fileorg.store import ChromaStore, MetadataStore
 
 console = Console()
 _STATUS_UPDATE_INTERVAL = 0.2
+AUTO_STRUCTURE_TREE = os.environ.get("FILEORG_AUTO_STRUCTURE_TREE", "0") == "1"
 
 
 def _run_with_timer(label: str, fn: Callable[[], Any]) -> tuple[Any, float]:
@@ -51,7 +62,60 @@ def _run_with_timer(label: str, fn: Callable[[], Any]) -> tuple[Any, float]:
     return result, elapsed
 
 
+def _refresh_index(config, metadata, chroma, text_embedder) -> None:
+    """Reindex after moves/deletes to keep stores in sync."""
+    try:
+        image_embedder = build_image_embedder(config)
+        indexer = Indexer(
+            config=config,
+            metadata=metadata,
+            chroma=chroma,
+            text_embedder=text_embedder,
+            image_embedder=image_embedder,
+        )
+        _run_with_timer("Re-indexing after changes…", lambda: indexer.run(full=True))
+    except Exception as exc:
+        console.print(f"[yellow]Index refresh failed: {exc}[/yellow]")
+
+
+def _auto_index_on_start(config, metadata, chroma, text_embedder) -> None:
+    """Quick incremental index when chat starts to pick up new files."""
+    try:
+        image_embedder = build_image_embedder(config)
+        indexer = Indexer(
+            config=config,
+            metadata=metadata,
+            chroma=chroma,
+            text_embedder=text_embedder,
+            image_embedder=image_embedder,
+        )
+    except Exception as exc:
+        console.print(f"[yellow]Skipping auto-index (missing embedder): {exc}[/yellow]")
+        return
+
+    try:
+        stats, elapsed = _run_with_timer(
+            "Auto-indexing new files…", lambda: indexer.run(full=False)
+        )
+    except Exception as exc:
+        console.print(f"[yellow]Auto-index failed: {exc}[/yellow]")
+        return
+
+    if stats.indexed or stats.removed:
+        console.print(
+            f"[green]Auto-index complete[/green] "
+            f"(indexed {stats.indexed}, skipped {stats.skipped}, removed {stats.removed}) "
+            f"in {elapsed:.1f}s."
+        )
+    else:
+        console.print(f"[dim]Index already up to date ({elapsed:.1f}s).[/dim]")
+
+
+
+
+
 def _handle_tool_call(name: str, args: dict[str, Any], deps: dict) -> ToolResult:
+    # usage_callback is passed in deps if available
     if name == "search_files":
         return tool_search(
             query=args.get("query", ""),
@@ -61,30 +125,44 @@ def _handle_tool_call(name: str, args: dict[str, Any], deps: dict) -> ToolResult
         )
     if name == "find_duplicates":
         return tool_duplicates(metadata=deps["metadata"])
-    if name == "find_stale_files":
-        return tool_stale(days=int(args.get("days", 180)), metadata=deps["metadata"])
     if name == "suggest_structure":
-        return tool_suggest_structure(
-            chroma=deps["chroma"],
-            client=deps["client"],
-            config=deps["config"],
-            min_cluster_size=int(args.get("min_cluster_size", 3)),
-            min_samples=int(args.get("min_samples", 2)),
-        )
+        # Wrap in timer to show progress for this potentially slow operation
+        def _run_structure_tool():
+            config = deps.get("config")
+            result = tool_suggest_structure(
+                chroma=deps["chroma"],
+                client=deps["client"],
+                min_cluster_size=int(args.get("min_cluster_size", 3)),
+                min_samples=int(args.get("min_samples", 2)),
+                scan_root=config.scan.root if config is not None else None,
+                config=config,
+                usage_callback=deps.get("usage_callback"),
+            )
+            return result
+        
+        result, _ = _run_with_timer("Analyzing file structure…", _run_structure_tool)
+        return result
     if name == "preview_moves":
         plan = args.get("plan", [])
         return tool_preview_moves(plan=plan)
+    if name == "move_files":
+        plan = args.get("plan", [])
+        return tool_move(plan=plan)
+    if name == "delete_items":
+        items = args.get("items", [])
+        return tool_delete(items=items)
     raise ValueError(f"Unknown tool: {name}")
 
 
 def chat_loop() -> None:
     config = load_config(create=True)
-    client = OpenAI()
+    client = OpenAI(timeout=60.0)  # 60 second timeout for all API calls
     chroma = ChromaStore(config.chroma_dir())
     metadata = MetadataStore(config.metadata_db_path())
     text_embedder, _ = _run_with_timer(
         "Loading text embedder…", lambda: build_text_embedder(config)
     )
+    _auto_index_on_start(config, metadata, chroma, text_embedder)
 
     def limited_messages(
         max_chars: int = 12000, max_messages: int = 18
@@ -146,85 +224,244 @@ def chat_loop() -> None:
         keep_indices_sorted = sorted(set(keep_indices))
         return [system] + [messages[i] for i in keep_indices_sorted]
 
-    system_prompt = (
-        "You are FileOrg, a local file organization assistant. "
-        "Use tools to search files, find duplicates, find stale files, and organize files. "
-        "For any request to organize/restructure/move files, always return a preview move plan and tree (dry-run only), "
-        "using suggest_structure or preview_moves as appropriate. Never delete or actually move files."
-    )
+    system_prompt = get_system_prompt()
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     console.print(
         Panel(
             "[bold cyan]FileOrg[/bold cyan] chat (GPT-4o)\n"
-            "[dim]Type 'exit' to quit. Tools: search, duplicates, stale, structure, preview.[/dim]",
+            "[dim]Type 'exit' to quit. Tools: search, duplicates, structure, preview, move, delete.[/dim]",
             border_style="cyan",
         )
     )
 
-    while True:
-        try:
-            user_input = console.input("[bold green]> [/bold green]")
-        except (EOFError, KeyboardInterrupt):
-            console.print("\nGoodbye.")
-            break
+    # Track token usage throughout the session
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    total_tokens = 0
 
-        if user_input.strip().lower() in {"exit", "quit"}:
-            console.print("Goodbye.")
-            break
-        if not user_input.strip():
-            continue
-        messages.append({"role": "user", "content": user_input})
+    def _accumulate_usage(response) -> None:
+        """Accumulate token usage from an API response."""
+        nonlocal total_prompt_tokens, total_completion_tokens, total_tokens
+        if hasattr(response, "usage") and response.usage:
+            total_prompt_tokens += response.usage.prompt_tokens or 0
+            total_completion_tokens += response.usage.completion_tokens or 0
+            total_tokens += response.usage.total_tokens or 0
 
-        response, _ = _run_with_timer(
-            "Thinking…",
-            lambda: client.chat.completions.create(
-                model="gpt-4o",
-                messages=limited_messages(),
-                tools=tool_definitions(),
-            ),
-        )
-        message = response.choices[0].message
-        tool_calls = message.tool_calls or []
+    try:
+        while True:
+            try:
+                user_input = console.input("[bold green]> [/bold green]")
+            except (EOFError, KeyboardInterrupt):
+                console.print("\nGoodbye.")
+                break
 
-        if tool_calls:
-            # Keep the assistant message with tool_calls in history for proper threading.
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": message.content or "",
-                    "tool_calls": [tc.model_dump() for tc in tool_calls],
-                }
-            )
-            for call in tool_calls:
-                args = json.loads(call.function.arguments or "{}")
-                result = _handle_tool_call(
-                    call.function.name,
-                    args,
-                    deps={
-                        "chroma": chroma,
-                        "metadata": metadata,
-                        "text_embedder": text_embedder,
-                        "client": client,
-                        "config": config,
-                    },
-                )
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "name": result.name,
-                        "content": result.content,
-                    }
-                )
+            if user_input.strip().lower() in {"exit", "quit"}:
+                break
+            if not user_input.strip():
+                continue
+            messages.append({"role": "user", "content": user_input})
+
             response, _ = _run_with_timer(
                 "Thinking…",
                 lambda: client.chat.completions.create(
-                    model="gpt-4o", messages=limited_messages(), tools=tool_definitions()
+                    model="gpt-4o",
+                    messages=limited_messages(),
+                    tools=tool_definitions(),
                 ),
             )
+            _accumulate_usage(response)
             message = response.choices[0].message
+            tool_calls = message.tool_calls or []
 
-        if message.content:
-            console.print(f"[pink]  •[/pink] [bright_black]{message.content}[/]")
-            messages.append({"role": "assistant", "content": message.content})
+            if tool_calls:
+                # Keep the assistant message with tool_calls in history for proper threading.
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": message.content or "",
+                        "tool_calls": [tc.model_dump() for tc in tool_calls],
+                    }
+                )
+                action_applied = False
+                action_messages: list[str] = []
+                for call in tool_calls:
+                    console.print(f"[dim]Calling tool: {call.function.name}[/dim]")
+                    args = json.loads(call.function.arguments or "{}")
+                    try:
+                        deps = {
+                            "chroma": chroma,
+                            "metadata": metadata,
+                            "text_embedder": text_embedder,
+                            "client": client,
+                            "config": config,
+                            "usage_callback": _accumulate_usage,
+                        }
+                        result = _handle_tool_call(call.function.name, args, deps=deps)
+                        console.print(f"[dim]Tool {call.function.name} completed[/dim]")
+                        # Debug: show a preview of the result
+                        content_preview = result.content[:200] + "..." if len(result.content) > 200 else result.content
+                        console.print(f"[dim]Result preview: {content_preview}[/dim]")
+                        if call.function.name == "suggest_structure":
+                            scan_root = deps["config"].scan.root if deps.get("config") is not None else None
+                            if AUTO_STRUCTURE_TREE:
+                                display_structure_tree(
+                                    result.content,
+                                    console=console,
+                                    scan_root=scan_root,
+                                    after_apply=lambda: _refresh_index(config, metadata, chroma, text_embedder),
+                                )
+                            suggestions = parse_structure_suggestions(result.content)
+                            if suggestions:
+                                plan = build_move_plan(suggestions, scan_root=scan_root)
+                                preview_result = display_move_preview(
+                                    json.dumps(plan),
+                                    console=console,
+                                    scan_root=scan_root,
+                                    after_apply=lambda: _refresh_index(config, metadata, chroma, text_embedder),
+                                )
+                                if preview_result and preview_result.get("action") == "approve":
+                                    stats = preview_result.get("stats") or {}
+                                    summary = (
+                                        f"Move plan approved and applied "
+                                        f"(moved {stats.get('moved', 0)}, "
+                                        f"missing {stats.get('skipped_missing', 0)}, "
+                                        f"conflicts {stats.get('skipped_conflict', 0)}, "
+                                        f"outside-root {stats.get('skipped_outside', 0)}, "
+                                        f"errors {stats.get('errors', 0)})."
+                                    )
+                                    action_messages.append(summary)
+                                    messages.append(
+                                        {
+                                            "role": "assistant",
+                                            "content": summary,
+                                        }
+                                    )
+                                    action_applied = True
+                        elif call.function.name == "preview_moves":
+                            preview_result = display_move_preview(
+                                result.content,
+                                console=console,
+                                scan_root=deps["config"].scan.root if deps.get("config") is not None else None,
+                                after_apply=lambda: _refresh_index(config, metadata, chroma, text_embedder),
+                            )
+                            if preview_result and preview_result.get("action") == "approve":
+                                stats = preview_result.get("stats") or {}
+                                summary = (
+                                    f"Move plan approved and applied "
+                                    f"(moved {stats.get('moved', 0)}, "
+                                    f"missing {stats.get('skipped_missing', 0)}, "
+                                    f"conflicts {stats.get('skipped_conflict', 0)}, "
+                                    f"outside-root {stats.get('skipped_outside', 0)}, "
+                                    f"errors {stats.get('errors', 0)})."
+                                )
+                                action_messages.append(summary)
+                                messages.append(
+                                    {
+                                        "role": "assistant",
+                                        "content": summary,
+                                    }
+                                )
+                                action_applied = True
+                        elif call.function.name == "move_files":
+                            preview_result = display_move_preview(
+                                result.content,
+                                console=console,
+                                scan_root=deps["config"].scan.root if deps.get("config") is not None else None,
+                                after_apply=lambda: _refresh_index(config, metadata, chroma, text_embedder),
+                            )
+                            if preview_result and preview_result.get("action") == "approve":
+                                stats = preview_result.get("stats") or {}
+                                summary = (
+                                    f"Move plan approved and applied "
+                                    f"(moved {stats.get('moved', 0)}, "
+                                    f"missing {stats.get('skipped_missing', 0)}, "
+                                    f"conflicts {stats.get('skipped_conflict', 0)}, "
+                                    f"outside-root {stats.get('skipped_outside', 0)}, "
+                                    f"errors {stats.get('errors', 0)})."
+                                )
+                                action_messages.append(summary)
+                                messages.append(
+                                    {
+                                        "role": "assistant",
+                                        "content": summary,
+                                    }
+                                )
+                                action_applied = True
+                        elif call.function.name == "delete_items":
+                            preview_result = display_delete_preview(
+                                result.content,
+                                console=console,
+                                scan_root=deps["config"].scan.root if deps.get("config") is not None else None,
+                                after_apply=lambda: _refresh_index(config, metadata, chroma, text_embedder),
+                            )
+                            if preview_result and preview_result.get("action") == "approve":
+                                stats = preview_result.get("stats") or {}
+                                summary = (
+                                    f"Delete plan approved and applied "
+                                    f"(deleted {stats.get('deleted', 0)}, "
+                                    f"missing {stats.get('skipped_missing', 0)}, "
+                                    f"outside-root {stats.get('skipped_outside', 0)}, "
+                                    f"errors {stats.get('errors', 0)})."
+                                )
+                                action_messages.append(summary)
+                                messages.append(
+                                    {
+                                        "role": "assistant",
+                                        "content": summary,
+                                    }
+                                )
+                                action_applied = True
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call.id,
+                                "name": result.name,
+                                "content": result.content,
+                            }
+                        )
+                    except Exception as e:
+                        # If tool call fails, add error message to conversation
+                        error_msg = f"Error calling {call.function.name}: {str(e)}"
+                        console.print(f"[red]Error: {error_msg}[/red]")
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call.id,
+                                "name": call.function.name,
+                                "content": error_msg,
+                            }
+                        )
+                if action_applied:
+                    for text in action_messages:
+                        console.print(f"[pink]  •[/pink] [bright_black]{text}[/]")
+                    continue
+                else:
+                    response, _ = _run_with_timer(
+                        "Thinking…",
+                        lambda: client.chat.completions.create(
+                            model="gpt-4o", messages=limited_messages(), tools=tool_definitions()
+                        ),
+                    )
+                    _accumulate_usage(response)
+                    message = response.choices[0].message
+
+            if message.content:
+                console.print(f"[pink]  •[/pink] [bright_black]{message.content}[/]")
+                messages.append({"role": "assistant", "content": message.content})
+    except (EOFError, KeyboardInterrupt):
+        pass
+    finally:
+        # Display token usage summary
+        console.print("\n[dim]Goodbye.[/dim]")
+        if total_tokens > 0:
+            console.print(
+                Panel(
+                    f"[bold]Token Usage Summary[/bold]\n"
+                    f"Prompt tokens: [cyan]{total_prompt_tokens:,}[/cyan]\n"
+                    f"Completion tokens: [cyan]{total_completion_tokens:,}[/cyan]\n"
+                    f"Total tokens: [cyan]{total_tokens:,}[/cyan]",
+                    border_style="dim",
+                    title="Session Summary",
+                )
+            )

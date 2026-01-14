@@ -80,7 +80,7 @@ class IndexingConfig(ConfigModel):
 
 
 class EmbeddingsConfig(ConfigModel):
-    text_model: str = "BAAI/bge-base-en-v1.5"
+    text_model: str = "BAAI/bge-m3"
     image_model: str = "ViT-B/32"
     text_provider: str = "huggingface"
     image_provider: str = "clip"

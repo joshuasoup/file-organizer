@@ -42,6 +42,19 @@ export FILEORG_HOME="/path/to/writable/dir"
 export FILEORG_CONFIG="/path/to/writable/dir/config.toml"
 ```
 
+### Sandbox testing
+
+Create an isolated sandbox with sample files (all left unsorted at root) and its own config (no real files touched):
+
+```bash
+python scripts/setup_sandbox.py            # or: python scripts/setup_sandbox.py /tmp/my-sandbox
+export FILEORG_CONFIG=$(pwd)/.sandbox_fileorg/config.toml  # path printed by the script
+fileorg index --full
+fileorg chat   # try search/structure too
+```
+
+Unset `FILEORG_CONFIG` when you want to return to your real config.
+
 Default behavior:
 
 - Root is `~`
@@ -92,7 +105,7 @@ fileorg search "find my tax receipts"
 fileorg chat
 ```
 
-This opens a GPT-4o powered chat with tools for semantic search, duplicates, stale files, structure suggestions, and move previews. Type `exit` to quit. Requires `OPENAI_API_KEY`.
+This opens a GPT-4o powered chat with tools for semantic search, duplicates, structure suggestions, and move previews. Type `exit` to quit. Requires `OPENAI_API_KEY`.
 
 Shortcut: running `fileorg` with no arguments also launches chat.
 
