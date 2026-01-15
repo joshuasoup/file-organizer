@@ -11,6 +11,7 @@ from fileorg.chat.tools.plan_ops import (
     parse_move_plan,
     parse_structure_suggestions,
 )
+from fileorg.undo import clear_last_action, save_last_move
 
 
 def display_structure_tree(
@@ -80,13 +81,12 @@ def display_structure_tree(
                 if paths:
                     for path in paths:
                         parent.add(str(path))
-                    parent.expand()
                 else:
                     parent.add("[no files listed]")
 
             yield tree
             yield Static(
-                "Actions: [bold]a[/] approve · [bold]c[/] request changes · [bold]d[/] decline · [bold]q/esc/enter/space[/] close",
+                "[bold]a[/] approve · [bold]c[/] request changes · [bold]d[/] decline · [bold]q/esc/enter/space[/] close",
                 classes="actions",
             )
 
@@ -114,6 +114,11 @@ def display_structure_tree(
                 console.print("[yellow]Cannot apply moves without a scan root. Showing preview only.[/yellow]")
             else:
                 move_stats = apply_move_plan(plan, scan_root=scan_root)
+                applied_moves = move_stats.get("applied") or []
+                if applied_moves:
+                    save_last_move(applied_moves, scan_root)
+                else:
+                    clear_last_action()
                 console.print(
                     f"[green]Approved: applied move plan[/green] "
                     f"(moved {move_stats['moved']}, "
@@ -141,6 +146,8 @@ def display_structure_tree(
             console.print(
                 "[dim]No action selected. You can approve (a), request changes (c), or decline (d).[/dim]"
             )
+    except KeyboardInterrupt:
+        console.print("[yellow]Closed preview (Ctrl+C).[/yellow]")
     except Exception as exc:
         console.print(f"[yellow]Couldn't open Textual tree ({exc}); skipping preview.[/yellow]")
 
@@ -212,11 +219,10 @@ def display_move_preview(
                     parent = path_nodes[key]
                     if idx == len(parts) - 1:
                         parent.add(src or "[no src]")
-                        parent.expand()
 
             yield tree
             yield Static(
-                "Actions: [bold]a[/] approve · [bold]c[/] request changes · [bold]d[/] decline · [bold]q/esc/enter/space[/] close",
+                "[bold]a[/] approve · [bold]c[/] request changes · [bold]d[/] decline · [bold]q/esc/enter/space[/] close",
                 classes="actions",
             )
 
@@ -241,6 +247,11 @@ def display_move_preview(
                 console.print("[yellow]Cannot apply moves without a scan root. Preview only.[/yellow]")
             else:
                 move_stats = apply_move_plan(plan, scan_root=scan_root)
+                applied_moves = move_stats.get("applied") or []
+                if applied_moves:
+                    save_last_move(applied_moves, scan_root)
+                else:
+                    clear_last_action()
                 console.print(
                     f"[green]Approved: applied move plan[/green] "
                     f"(moved {move_stats['moved']}, "
@@ -263,9 +274,17 @@ def display_move_preview(
             console.print(
                 "[dim]No action selected. You can approve (a), request changes (c), or decline (d).[/dim]"
             )
+    except KeyboardInterrupt:
+        console.print("[yellow]Closed preview (Ctrl+C).[/yellow]")
+        return {"action": None, "stats": stats_holder, "plan_size": len(plan), "plan": plan}
     except Exception as exc:
         console.print(f"[yellow]Couldn't open Textual move preview ({exc}); skipping preview.[/yellow]")
-    return {"action": action_holder.get("value"), "stats": stats_holder, "plan_size": len(plan)}
+    return {
+        "action": action_holder.get("value"),
+        "stats": stats_holder,
+        "plan_size": len(plan),
+        "plan": plan,
+    }
 
 
 def display_delete_preview(
@@ -337,11 +356,10 @@ def display_delete_preview(
                     parent = path_nodes[key]
                     if idx == len(parts) - 1:
                         parent.add("[delete]")
-                        parent.expand()
 
             yield tree
             yield Static(
-                "Actions: [bold]a[/] approve · [bold]c[/] request changes · [bold]d[/] decline · [bold]q/esc/enter/space[/] close",
+                "[bold]a[/] approve · [bold]c[/] request changes · [bold]d[/] decline · [bold]q/esc/enter/space[/] close",
                 classes="actions",
             )
 
@@ -387,6 +405,9 @@ def display_delete_preview(
             console.print(
                 "[dim]No action selected. You can approve (a), request changes (c), or decline (d).[/dim]"
             )
+    except KeyboardInterrupt:
+        console.print("[yellow]Closed preview (Ctrl+C).[/yellow]")
+        return {"action": None, "stats": stats_holder, "plan_size": len(items)}
     except Exception as exc:
         console.print(f"[yellow]Couldn't open Textual delete preview ({exc}); skipping preview.[/yellow]")
     return {"action": action_holder.get("value"), "stats": stats_holder, "plan_size": len(items)}

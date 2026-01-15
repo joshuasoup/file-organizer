@@ -13,6 +13,7 @@ import typer
 
 from fileorg.config import load_config
 from fileorg.embeddings import build_text_embedder, build_image_embedder
+from fileorg.undo import clear_last_action, save_last_move
 from fileorg.chat.tools import (
     ToolResult,
     tool_definitions,
@@ -22,6 +23,7 @@ from fileorg.chat.tools import (
     tool_preview_moves,
     tool_search,
     tool_suggest_structure,
+    tool_undo_last_action,
 )
 from fileorg.chat.tools.plan_ops import build_move_plan, parse_structure_suggestions
 from fileorg.chat.tools.previews import (
@@ -151,6 +153,8 @@ def _handle_tool_call(name: str, args: dict[str, Any], deps: dict) -> ToolResult
     if name == "delete_items":
         items = args.get("items", [])
         return tool_delete(items=items)
+    if name == "undo_last_action":
+        return tool_undo_last_action()
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -230,7 +234,7 @@ def chat_loop() -> None:
     console.print(
         Panel(
             "[bold cyan]FileOrg[/bold cyan] chat (GPT-4o)\n"
-            "[dim]Type 'exit' to quit. Tools: search, duplicates, structure, preview, move, delete.[/dim]",
+            "[dim]Type 'exit' to quit. Tools: search, duplicates, structure, preview, move, delete, undo.[/dim]",
             border_style="cyan",
         )
     )
@@ -253,7 +257,6 @@ def chat_loop() -> None:
             try:
                 user_input = console.input("[bold green]> [/bold green]")
             except (EOFError, KeyboardInterrupt):
-                console.print("\nGoodbye.")
                 break
 
             if user_input.strip().lower() in {"exit", "quit"}:
@@ -322,6 +325,11 @@ def chat_loop() -> None:
                                 )
                                 if preview_result and preview_result.get("action") == "approve":
                                     stats = preview_result.get("stats") or {}
+                                    applied_moves = stats.get("applied") or []
+                                    if applied_moves and scan_root is not None:
+                                        save_last_move(applied_moves, scan_root)
+                                    else:
+                                        clear_last_action()
                                     summary = (
                                         f"Move plan approved and applied "
                                         f"(moved {stats.get('moved', 0)}, "
@@ -347,6 +355,12 @@ def chat_loop() -> None:
                             )
                             if preview_result and preview_result.get("action") == "approve":
                                 stats = preview_result.get("stats") or {}
+                                applied_moves = stats.get("applied") or []
+                                scan_root = deps["config"].scan.root if deps.get("config") is not None else None
+                                if applied_moves and scan_root is not None:
+                                    save_last_move(applied_moves, scan_root)
+                                else:
+                                    clear_last_action()
                                 summary = (
                                     f"Move plan approved and applied "
                                     f"(moved {stats.get('moved', 0)}, "
@@ -372,6 +386,12 @@ def chat_loop() -> None:
                             )
                             if preview_result and preview_result.get("action") == "approve":
                                 stats = preview_result.get("stats") or {}
+                                applied_moves = stats.get("applied") or []
+                                scan_root = deps["config"].scan.root if deps.get("config") is not None else None
+                                if applied_moves and scan_root is not None:
+                                    save_last_move(applied_moves, scan_root)
+                                else:
+                                    clear_last_action()
                                 summary = (
                                     f"Move plan approved and applied "
                                     f"(moved {stats.get('moved', 0)}, "
@@ -412,6 +432,49 @@ def chat_loop() -> None:
                                     }
                                 )
                                 action_applied = True
+                        elif call.function.name == "undo_last_action":
+                            undo_payload = {}
+                            try:
+                                undo_payload = json.loads(result.content or "{}")
+                            except Exception:
+                                undo_payload = {}
+                            error = undo_payload.get("error")
+                            if error:
+                                console.print(f"[yellow]{error}[/yellow]")
+                                messages.append(
+                                    {
+                                        "role": "assistant",
+                                        "content": error,
+                                    }
+                                )
+                            else:
+                                plan = undo_payload.get("plan") or []
+                                scan_root = deps["config"].scan.root if deps.get("config") is not None else None
+                                preview_result = display_move_preview(
+                                    json.dumps(plan),
+                                    console=console,
+                                    scan_root=scan_root,
+                                    after_apply=lambda: _refresh_index(config, metadata, chroma, text_embedder),
+                                )
+                                if preview_result and preview_result.get("action") == "approve":
+                                    stats = preview_result.get("stats") or {}
+                                    clear_last_action()
+                                    summary = (
+                                        f"Undo applied "
+                                        f"(moved {stats.get('moved', 0)}, "
+                                        f"missing {stats.get('skipped_missing', 0)}, "
+                                        f"conflicts {stats.get('skipped_conflict', 0)}, "
+                                        f"outside-root {stats.get('skipped_outside', 0)}, "
+                                        f"errors {stats.get('errors', 0)})."
+                                    )
+                                    action_messages.append(summary)
+                                    messages.append(
+                                        {
+                                            "role": "assistant",
+                                            "content": summary,
+                                        }
+                                    )
+                                    action_applied = True
                         messages.append(
                             {
                                 "role": "tool",

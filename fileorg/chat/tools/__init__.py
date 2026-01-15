@@ -4,6 +4,7 @@ from fileorg.chat.tools.duplicates import tool_duplicates
 from fileorg.chat.tools.structure import tool_suggest_structure
 from fileorg.chat.tools.moves import tool_preview_moves, tool_move
 from fileorg.chat.tools.delete import tool_delete
+from fileorg.chat.tools.undo import tool_undo_last_action
 
 
 def tool_definitions() -> list[dict]:
@@ -110,6 +111,14 @@ def tool_definitions() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "undo_last_action",
+                "description": "Undo the most recent applied move plan (single-level undo).",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
     ]
 
 
@@ -122,4 +131,5 @@ __all__ = [
     "tool_preview_moves",
     "tool_move",
     "tool_delete",
+    "tool_undo_last_action",
 ]

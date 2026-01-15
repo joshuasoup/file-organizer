@@ -1,4 +1,5 @@
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -294,6 +295,7 @@ def structure(
     client = OpenAI(timeout=60.0)
     chroma = ChromaStore(config.chroma_dir())
     console.print("[cyan]Analyzing file structure…[/cyan]")
+    started = time.perf_counter()
     result = tool_suggest_structure(
         chroma=chroma,
         client=client,
@@ -302,9 +304,51 @@ def structure(
         scan_root=config.scan.root,
         config=config,
     )
+    elapsed = time.perf_counter() - started
     preview = result.content[:300] + ("…" if len(result.content) > 300 else "")
     console.print(f"[dim]Result preview: {preview}[/dim]")
+    console.print(f"[dim]Analysis completed in {elapsed:.1f}s[/dim]")
     display_structure_tree(result.content, console=console, scan_root=config.scan.root)
+
+
+@app.command()
+def undo() -> None:
+    """Undo the most recent applied move plan."""
+    from fileorg.chat.tools.plan_ops import apply_move_plan
+    from fileorg.undo import build_undo_plan, clear_last_action, load_last_action
+
+    config = load_config(create=True)
+    action = load_last_action()
+    if not action or action.get("action") != "move":
+        console.print("[yellow]No move action available to undo.[/yellow]")
+        raise typer.Exit(code=1)
+
+    scan_root = Path(action.get("scan_root") or config.scan.root)
+    plan = build_undo_plan(action)
+    if not plan:
+        console.print("[yellow]Could not build undo plan.[/yellow]")
+        raise typer.Exit(code=1)
+
+    console.print("[cyan]Undo plan (first 20 moves):[/cyan]")
+    for entry in plan[:20]:
+        console.print(f"- {entry['src']} -> {entry['dest']}")
+    if len(plan) > 20:
+        console.print(f"[dim]...and {len(plan) - 20} more[/dim]")
+
+    if not typer.confirm("Apply undo?"):
+        console.print("[dim]Cancelled.[/dim]")
+        raise typer.Exit(code=0)
+
+    stats = apply_move_plan(plan, scan_root=scan_root)
+    console.print(
+        f"[green]Undo applied[/green] "
+        f"(moved {stats['moved']}, "
+        f"missing {stats['skipped_missing']}, "
+        f"conflicts {stats['skipped_conflict']}, "
+        f"outside-root {stats['skipped_outside']}, "
+        f"errors {stats['errors']})."
+    )
+    clear_last_action()
 
 
 def main() -> None:

@@ -69,6 +69,22 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
+def _clean_empty_parents(path: Path, root: Path) -> None:
+    """Remove empty parent directories up to (but not including) root."""
+    root_resolved = root.resolve()
+    current = path.parent
+    while True:
+        try:
+            if current == root_resolved:
+                break
+            if not current.exists() or any(current.iterdir()):
+                break
+            current.rmdir()
+        except Exception:
+            break
+        current = current.parent
+
+
 def apply_move_plan(plan: list[dict[str, str]], scan_root: Path) -> dict[str, int]:
     root = scan_root.resolve()
     stats = {
@@ -77,6 +93,7 @@ def apply_move_plan(plan: list[dict[str, str]], scan_root: Path) -> dict[str, in
         "skipped_outside": 0,
         "skipped_conflict": 0,
         "errors": 0,
+        "applied": [],
     }
     for entry in plan:
         raw_src = entry.get("src", "")
@@ -112,6 +129,8 @@ def apply_move_plan(plan: list[dict[str, str]], scan_root: Path) -> dict[str, in
             dest.parent.mkdir(parents=True, exist_ok=True)
             src.rename(dest)
             stats["moved"] += 1
+            stats["applied"].append({"src": str(src), "dest": str(dest)})
+            _clean_empty_parents(src, root)
         except Exception:
             stats["errors"] += 1
     return stats
