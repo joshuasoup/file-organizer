@@ -5,10 +5,11 @@ Local-first file indexer + semantic search for macOS.
 ### Requirements
 
 - macOS
-- Python 3.11+ (3.11 or 3.12 recommended; Pillow wheels for 3.13 may lag)
+- Python 3.12+ (3.12 recommended; Pillow wheels for 3.13 may lag)
 - HuggingFace text embeddings (SentenceTransformers)
 - CLIP deps for image embeddings: `torch` + `open_clip_torch`
 - Semantic clustering: `hdbscan`
+- OpenAI API key (for chat features)
 
 ### Setup
 
@@ -18,6 +19,13 @@ Local-first file indexer + semantic search for macOS.
 python -m venv venv
 source venv/bin/activate
 pip install -e .
+```
+
+2. Set your OpenAI API key (required for chat):
+
+```bash
+export OPENAI_API_KEY="your-api-key-here"
+# or create a .env file with: OPENAI_API_KEY=your-api-key-here
 ```
 
 ### Configure
@@ -66,13 +74,23 @@ Default behavior:
 
 You can edit `config.toml` to adjust ignore patterns, size limits, and models.
 
-Text embeddings default to HuggingFace (`BAAI/bge-base-en-v1.5`). To switch back to Ollama, set:
+Text embeddings default to HuggingFace (`BAAI/bge-m3`). To switch to Ollama, set:
 
 ```
 [embeddings]
 text_provider = "ollama"
 text_model = "bge-base-en-v1.5"
 ```
+
+### Supported File Types
+
+The indexer supports multiple file types with specialized extraction:
+
+- **PDF**: Extracted using `pdfplumber`
+- **DOCX**: Extracted using `python-docx`
+- **Text files**: `.txt`, `.md`, `.markdown`, `.rtf`
+- **Code files**: `.py`, `.js`, `.ts`, `.tsx`, `.jsx`, `.java`, `.go`, `.rs`, `.rb`, `.php`, `.swift`, `.kt`, `.cpp`, `.c`, `.h`, `.hpp`, `.cs`, `.sh`, `.bash`, `.zsh`, `.sql`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.cfg`
+- **Images**: `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tif`, `.tiff`, `.heic`, `.heif`, `.webp` (embedded using CLIP)
 
 ### Indexing
 
@@ -88,6 +106,16 @@ To rebuild from scratch:
 fileorg index --full
 ```
 
+The indexer will:
+
+- Scan files and assess folder organization
+- Extract text content from supported file types
+- Generate embeddings for text and images
+- Store vectors in ChromaDB and metadata in SQLite
+- Report organized vs. needs-attention directories
+- Show loose files at root level
+- Identify misplaced GitHub repos
+
 Data storage:
 
 - Vectors: `~/Library/Application Support/FileOrg/chroma/`
@@ -95,31 +123,76 @@ Data storage:
 
 ### Search
 
+Semantic search over indexed files:
+
 ```bash
-fileorg search "find my tax receipts"
+fileorg search "find my tax receipts" [--limit 5]
 ```
 
 ### Chat
+
+Interactive GPT-4o powered chat interface:
 
 ```bash
 fileorg chat
 ```
 
-This opens a GPT-4o powered chat with tools for semantic search, duplicates, structure suggestions, and move previews. Type `exit` to quit. Requires `OPENAI_API_KEY`.
-
 Shortcut: running `fileorg` with no arguments also launches chat.
 
-The “suggest structure” tool clusters embeddings (text + images) with HDBSCAN and asks GPT-4o to name the clusters. If `hdbscan` isn’t installed, the tool will say so.
+**Available Chat Tools:**
+
+- **`search_files`**: Semantic search over indexed text and images
+- **`find_duplicates`**: Find duplicate files by exact content hash
+- **`suggest_structure`**: Suggest folder structure based on clustered embeddings (uses HDBSCAN + GPT-4o)
+- **`preview_moves`**: Preview file move/rename plan before execution
+- **`move_files`**: Move files with preview/approval flow
+- **`delete_items`**: Delete specific files or folders (requires approval)
+- **`undo_last_action`**: Undo the most recent applied move plan
+
+The chat interface features:
+
+- Auto-indexing on startup to pick up new files
+- Automatic index refresh after moves/deletes
+- Token usage tracking and summary
+- Interactive previews for moves and deletes
+- Structured tree display for organization suggestions
+
+Type `exit` or `quit` to end the chat session.
+
+### Structure Command
+
+Run structure analysis directly from the command line:
+
+```bash
+fileorg structure [--min-cluster-size 3] [--min-samples 2]
+```
+
+This runs the `suggest_structure` tool and displays the proposed folder tree.
+
+### Undo Command
+
+Undo the most recent applied move plan:
+
+```bash
+fileorg undo
+```
+
+This will show a preview of the undo plan and ask for confirmation before applying.
 
 ### Manual testing checklist
 
 - `fileorg config` creates the config file and shows defaults.
 - `fileorg index` completes without errors and reports counts.
 - `fileorg search "query"` returns relevant files.
+- `fileorg chat` starts and responds to queries.
+- `fileorg structure` generates folder organization suggestions.
+- `fileorg undo` can reverse the last move operation.
 
 ### Troubleshooting
 
 - If embeddings fail, ensure the HuggingFace model downloaded successfully
-  (`SentenceTransformer("BAAI/bge-base-en-v1.5")`).
+  (`SentenceTransformer("BAAI/bge-m3")`).
 - If `pip install -e .` fails on Pillow with Python 3.13, upgrade Pillow
   (already loosened to `pillow>=10.3.0`) or use Python 3.12.
+- If chat fails, ensure `OPENAI_API_KEY` is set in your environment or `.env` file.
+- If structure suggestions fail, ensure `hdbscan` is installed (`pip install hdbscan`).
