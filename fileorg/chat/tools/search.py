@@ -4,9 +4,17 @@ from fileorg.chat.tools.common import ToolResult, to_json
 from fileorg.store import ChromaStore
 
 
-def tool_search(query: str, limit: int, chroma: ChromaStore, embedder) -> ToolResult:
+def tool_search(
+    query: str,
+    limit: int,
+    chroma: ChromaStore,
+    embedder,
+    metadata=None,
+) -> ToolResult:
     embedding = embedder.embed_query(query)
-    results = chroma.query_text(embedding, limit=limit)
+    results = chroma.query_text(
+        embedding, limit=limit, query=query, metadata=metadata
+    )
     payload = [
         {"path": r.path, "distance": r.distance, "snippet": r.document[:400]}
         for r in results

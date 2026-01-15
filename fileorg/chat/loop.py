@@ -124,6 +124,7 @@ def _handle_tool_call(name: str, args: dict[str, Any], deps: dict) -> ToolResult
             limit=int(args.get("limit", 5)),
             chroma=deps["chroma"],
             embedder=deps["text_embedder"],
+            metadata=deps.get("metadata"),
         )
     if name == "find_duplicates":
         return tool_duplicates(metadata=deps["metadata"])
@@ -226,7 +227,46 @@ def chat_loop() -> None:
             idx -= 1
 
         keep_indices_sorted = sorted(set(keep_indices))
-        return [system] + [messages[i] for i in keep_indices_sorted]
+        if not keep_indices_sorted:
+            return [system]
+
+        # Ensure any assistant tool_calls have matching tool messages (and vice versa)
+        assistant_ids: dict[int, list[str]] = {}
+        tool_ids: dict[str, list[int]] = {}
+        for idx in keep_indices_sorted:
+            msg = messages[idx]
+            role = msg.get("role")
+            if role == "assistant" and msg.get("tool_calls"):
+                ids = [
+                    _tool_call_id(tc) for tc in msg.get("tool_calls") if _tool_call_id(tc)
+                ]
+                if ids:
+                    assistant_ids[idx] = ids
+            elif role == "tool":
+                tid = msg.get("tool_call_id")
+                if tid:
+                    tool_ids.setdefault(tid, []).append(idx)
+
+        valid_tool_ids = {
+            tid for ids in assistant_ids.values() for tid in ids if tid in tool_ids
+        }
+        filtered_indices: list[int] = []
+        for idx in keep_indices_sorted:
+            msg = messages[idx]
+            role = msg.get("role")
+            if role == "assistant" and msg.get("tool_calls"):
+                ids = [
+                    _tool_call_id(tc) for tc in msg.get("tool_calls") if _tool_call_id(tc)
+                ]
+                if not any(tid in valid_tool_ids for tid in ids):
+                    continue
+            if role == "tool":
+                tid = msg.get("tool_call_id")
+                if tid not in valid_tool_ids:
+                    continue
+            filtered_indices.append(idx)
+
+        return [system] + [messages[i] for i in filtered_indices]
 
     system_prompt = get_system_prompt()
 
@@ -497,7 +537,7 @@ def chat_loop() -> None:
                         )
                 if action_applied:
                     for text in action_messages:
-                        console.print(f"[pink]  •[/pink] [bright_black]{text}[/]")
+                        console.print(f"[pink]  •[/pink] [white]{text}[/]")
                     continue
                 else:
                     response, _ = _run_with_timer(
@@ -510,7 +550,7 @@ def chat_loop() -> None:
                     message = response.choices[0].message
 
             if message.content:
-                console.print(f"[pink]  •[/pink] [bright_black]{message.content}[/]")
+                console.print(f"[pink]  •[/pink] [white]{message.content}[/]")
                 messages.append({"role": "assistant", "content": message.content})
     except (EOFError, KeyboardInterrupt):
         pass

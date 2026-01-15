@@ -19,9 +19,19 @@ class ClipImageEmbedder(ImageEmbedder):
             ) from exc
 
         model_name = model.replace("/", "-")
+        pretrained_tag = "openai"
+        force_quick_gelu = False
+        # OpenAI weights expect QuickGELU; prefer the matching config to avoid warnings.
+        if "quickgelu" not in model_name.lower() and pretrained_tag == "openai":
+            quick_model_name = f"{model_name}-quickgelu"
+            if open_clip.get_model_config(quick_model_name):
+                model_name = quick_model_name
+            else:
+                force_quick_gelu = True
+
         self._torch = torch
         self._model, _, self._preprocess = open_clip.create_model_and_transforms(
-            model_name, pretrained="openai"
+            model_name, pretrained=pretrained_tag, force_quick_gelu=force_quick_gelu
         )
         self._device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._model.to(self._device)

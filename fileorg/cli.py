@@ -253,13 +253,16 @@ def search(
     limit: int = typer.Option(5, "--limit", min=1, max=50),
 ) -> None:
     from fileorg.embeddings import build_text_embedder
-    from fileorg.store import ChromaStore
+    from fileorg.store import ChromaStore, MetadataStore
 
     config = load_config(create=True)
     chroma = ChromaStore(config.chroma_dir())
+    metadata = MetadataStore(config.metadata_db_path())
     text_embedder = build_text_embedder(config)
     embedding = text_embedder.embed_query(query)
-    results = chroma.query_text(embedding, limit=limit)
+    results = chroma.query_text(
+        embedding, limit=limit, query=query, metadata=metadata
+    )
     if not results:
         console.print("No results found.")
         return
