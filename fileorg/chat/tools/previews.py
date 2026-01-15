@@ -4,6 +4,10 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from rich.console import Group
+from rich.panel import Panel
+from rich.text import Text
+
 from fileorg.chat.tools.plan_ops import (
     apply_delete_plan,
     apply_move_plan,
@@ -12,6 +16,151 @@ from fileorg.chat.tools.plan_ops import (
     parse_structure_suggestions,
 )
 from fileorg.undo import clear_last_action, save_last_move
+
+
+def display_search_results(
+    content: str,
+    console,
+    query: str | None = None,
+) -> None:
+    """Display search results in a clean, user-friendly format."""
+    try:
+        results = json.loads(content)
+    except Exception:
+        return
+    
+    if not isinstance(results, list) or not results:
+        return
+    
+    # Build a clean display
+    panels = []
+    for index, result in enumerate(results, 1):
+        path_str = result.get("path", "")
+        snippet = result.get("snippet", "")
+        
+        # Extract just the filename
+        try:
+            file_path = Path(path_str)
+            filename = file_path.name
+            # Show parent directory if it's meaningful and not too long
+            parent = file_path.parent.name if file_path.parent.name and file_path.parent.name != "." else None
+        except Exception:
+            filename = path_str
+            parent = None
+        
+        # Clean up snippet - remove extra whitespace and limit length
+        snippet_clean = " ".join(snippet.split())
+        if len(snippet_clean) > 180:
+            snippet_clean = snippet_clean[:177] + "..."
+        
+        # Build the content
+        content_lines = []
+        if parent:
+            content_lines.append(Text(f"📁 {parent}/", style="dim"))
+        # Make filename clickable with file:// URL
+        file_url = f"file://{path_str}"
+        # Use Rich's markdown link syntax
+        filename_link = f"[link={file_url}]{filename}[/link]"
+        content_lines.append(Text.from_markup(filename_link, style="bold cyan"))
+        # Add full path as clickable link below filename
+        path_link = f"[link={file_url}]{path_str}[/link]"
+        content_lines.append(Text.from_markup(path_link, style="dim"))
+        if snippet_clean:
+            content_lines.append(Text(""))
+            content_lines.append(Text(snippet_clean, style="dim"))
+        
+        panel_content = Group(*content_lines)
+        panels.append(
+            Panel(
+                panel_content,
+                border_style="dim",
+                padding=(0, 1),
+            )
+        )
+    
+    # Display all results with clean formatting
+    console.print()
+    if query:
+        console.print(f"[bold]Found {len(results)} result{'s' if len(results) != 1 else ''} for '{query}':[/bold]\n")
+    else:
+        console.print(f"[bold]Found {len(results)} result{'s' if len(results) != 1 else ''}:[/bold]\n")
+    
+    for panel in panels:
+        console.print(panel)
+    console.print()
+
+
+def display_duplicates(
+    content: str,
+    console,
+) -> None:
+    """Display duplicate files in a clean, user-friendly format."""
+    try:
+        duplicate_groups = json.loads(content)
+    except Exception:
+        return
+    
+    if not isinstance(duplicate_groups, list):
+        return
+    
+    if not duplicate_groups:
+        console.print()
+        console.print("[bold green]No duplicate files found![/bold green]\n")
+        return
+    
+    total_duplicates = sum(len(group) for group in duplicate_groups)
+    total_groups = len(duplicate_groups)
+    
+    console.print()
+    console.print(f"[bold]Found {total_groups} duplicate group{'s' if total_groups != 1 else ''} ({total_duplicates} total files):[/bold]\n")
+    
+    # Display only top 3 groups
+    max_display = 3
+    groups_to_show = duplicate_groups[:max_display]
+    remaining = total_groups - len(groups_to_show)
+    
+    for group_index, group in enumerate(groups_to_show, 1):
+        if not isinstance(group, list) or len(group) < 2:
+            continue
+        
+        # Get file size (all files in group should have same size)
+        file_size = group[0].get("size", 0) if group else 0
+        size_str = f"{file_size:,} bytes" if file_size else "unknown size"
+        
+        console.print(f"[bold cyan]Group {group_index}[/bold cyan] - {len(group)} identical files ({size_str})")
+        
+        # Display each file in the group
+        for file_info in group:
+            path_str = file_info.get("path", "")
+            if not path_str:
+                continue
+            
+            # Extract filename and parent directory
+            try:
+                file_path = Path(path_str)
+                filename = file_path.name
+                parent = file_path.parent.name if file_path.parent.name and file_path.parent.name != "." else None
+            except Exception:
+                filename = path_str
+                parent = None
+            
+            # Make path clickable
+            file_url = f"file://{path_str}"
+            path_link = f"[link={file_url}]{path_str}[/link]"
+            
+            # Display the line with clickable link
+            if parent:
+                console.print(f"  [dim]📁 {parent}/[/dim] [cyan link={file_url}]{path_str}[/cyan link={file_url}]")
+            else:
+                console.print(f"  [cyan link={file_url}]{path_str}[/cyan link={file_url}]")
+        
+        console.print()  # Empty line between groups
+    
+    # Show message if there are more groups
+    if remaining > 0:
+        console.print(f"[dim]... and {remaining} more duplicate group{'s' if remaining != 1 else ''}[/dim]\n")
+    
+    console.print()
 
 
 def display_structure_tree(

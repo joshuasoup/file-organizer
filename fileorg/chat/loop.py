@@ -28,7 +28,9 @@ from fileorg.chat.tools import (
 from fileorg.chat.tools.plan_ops import build_move_plan, parse_structure_suggestions
 from fileorg.chat.tools.previews import (
     display_delete_preview,
+    display_duplicates,
     display_move_preview,
+    display_search_results,
     display_structure_tree,
 )
 from fileorg.chat.system_prompt import get_system_prompt
@@ -341,11 +343,24 @@ def chat_loop() -> None:
                             "usage_callback": _accumulate_usage,
                         }
                         result = _handle_tool_call(call.function.name, args, deps=deps)
-                        console.print(f"[dim]Tool {call.function.name} completed[/dim]")
-                        # Debug: show a preview of the result
-                        content_preview = result.content[:200] + "..." if len(result.content) > 200 else result.content
-                        console.print(f"[dim]Result preview: {content_preview}[/dim]")
-                        if call.function.name == "suggest_structure":
+                        if call.function.name == "search_files":
+                            # Display search results in a clean, user-friendly format
+                            display_search_results(
+                                result.content,
+                                console=console,
+                                query=args.get("query"),
+                            )
+                            # Suppress verbose debug output for search
+                            console.print(f"[dim]Tool {call.function.name} completed[/dim]")
+                        elif call.function.name == "find_duplicates":
+                            # Display duplicates in a clean, user-friendly format
+                            display_duplicates(
+                                result.content,
+                                console=console,
+                            )
+                            # Suppress verbose debug output for duplicates
+                            console.print(f"[dim]Tool {call.function.name} completed[/dim]")
+                        elif call.function.name == "suggest_structure":
                             scan_root = deps["config"].scan.root if deps.get("config") is not None else None
                             if AUTO_STRUCTURE_TREE:
                                 display_structure_tree(
@@ -515,6 +530,11 @@ def chat_loop() -> None:
                                         }
                                     )
                                     action_applied = True
+                        else:
+                            # Default: show debug output for tools without special handling
+                            console.print(f"[dim]Tool {call.function.name} completed[/dim]")
+                            content_preview = result.content[:200] + "..." if len(result.content) > 200 else result.content
+                            console.print(f"[dim]Result preview: {content_preview}[/dim]")
                         messages.append(
                             {
                                 "role": "tool",
