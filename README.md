@@ -1,12 +1,6 @@
 ## FileOrg
 
-<!-- VIDEO_PLACEHOLDER: Add your video embed code here -->
-<!-- Examples: -->
-
-<video src="/demo.mp4" controls width="100%"></video>
-
-<!-- ![Video](path/to/video.gif) -->
-<!-- [![Video](thumbnail.png)](https://youtube.com/watch?v=...) -->
+![Demo](demo.gif)
 
 Local-first file indexer + semantic search for macOS.
 
