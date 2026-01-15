@@ -59,6 +59,10 @@ def _run_with_timer(label: str, fn: Callable[[], Any]) -> tuple[Any, float]:
         thread.start()
         try:
             result = fn()
+        except KeyboardInterrupt:
+            stop_event.set()
+            thread.join()
+            raise  # Re-raise KeyboardInterrupt to be handled by caller
         finally:
             stop_event.set()
             thread.join()
@@ -78,6 +82,8 @@ def _refresh_index(config, metadata, chroma, text_embedder) -> None:
             image_embedder=image_embedder,
         )
         _run_with_timer("Re-indexing after changes…", lambda: indexer.run(full=True))
+    except KeyboardInterrupt:
+        console.print(f"[yellow]Index refresh interrupted by user. Continuing...[/yellow]")
     except Exception as exc:
         console.print(f"[yellow]Index refresh failed: {exc}[/yellow]")
 
@@ -101,6 +107,9 @@ def _auto_index_on_start(config, metadata, chroma, text_embedder) -> None:
         stats, elapsed = _run_with_timer(
             "Auto-indexing new files…", lambda: indexer.run(full=False)
         )
+    except KeyboardInterrupt:
+        console.print(f"[yellow]Auto-index interrupted by user. Continuing...[/yellow]")
+        return
     except Exception as exc:
         console.print(f"[yellow]Auto-index failed: {exc}[/yellow]")
         return
