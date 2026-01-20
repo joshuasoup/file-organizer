@@ -1,2 +1,0 @@
-[console_scripts]
-drift = drift.__main__:main
