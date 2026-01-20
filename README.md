@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/joshuasoup/file-organizer">
-    <h1 style="font-size: 3em; margin: 0; text-align: center;">Drift</h1>
+    <a style="font-size: 3em; margin: 0; text-align: center;">Drift</a>
   </a>
 </p>
 <p align="center">Organize your files with AI.</p>
