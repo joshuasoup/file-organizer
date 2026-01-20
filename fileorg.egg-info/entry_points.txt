@@ -1,0 +1,2 @@
+[console_scripts]
+fileorg = fileorg.__main__:main

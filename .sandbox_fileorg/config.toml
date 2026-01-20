@@ -1,0 +1,32 @@
+[scan]
+root = "~/repos/projects/file-organizer/.sandbox_fileorg/scan_root"
+follow_symlinks = false
+include_hidden = true
+ignore_patterns = [
+
+]
+ignore_git_repos = true
+git_remote_hosts = [
+  "github.com"
+]
+
+[indexing]
+chunk_size = 900
+chunk_overlap = 150
+max_chunks_per_file = 200
+
+[indexing.file_size_limits]
+pdf = 104857600
+docx = 52428800
+txt = 209715200
+image = 10485760
+default = 5242880
+
+[embeddings]
+text_model = "BAAI/bge-m3"
+image_model = "ViT-B/32"
+text_provider = "huggingface"
+image_provider = "clip"
+
+[storage]
+base_dir = "~/repos/projects/file-organizer/.sandbox_fileorg/storage"

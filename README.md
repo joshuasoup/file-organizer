@@ -48,21 +48,21 @@ export OPENAI_API_KEY="your-api-key-here"
 Generate the default config and inspect it:
 
 ```bash
-fileorg config
+drift config
 ```
 
 Config file location:
 
 ```
-~/Library/Application Support/FileOrg/config.toml
+~/Library/Application Support/drift/config.toml
 ```
 
 You can override the config location (useful in sandboxes) with environment variables:
 
 ```
-export FILEORG_HOME="/path/to/writable/dir"
+export drift_HOME="/path/to/writable/dir"
 # or
-export FILEORG_CONFIG="/path/to/writable/dir/config.toml"
+export drift_CONFIG="/path/to/writable/dir/config.toml"
 ```
 
 ### Sandbox testing
@@ -71,12 +71,12 @@ Create an isolated sandbox with sample files (all left unsorted at root) and its
 
 ```bash
 python scripts/setup_sandbox.py            # or: python scripts/setup_sandbox.py /tmp/my-sandbox
-export FILEORG_CONFIG=$(pwd)/.sandbox_fileorg/config.toml  # path printed by the script
-fileorg index --full
-fileorg chat   # try search/structure too
+export drift_CONFIG=$(pwd)/.sandbox_drift/config.toml  # path printed by the script
+drift index --full
+drift chat   # try search/structure too
 ```
 
-Unset `FILEORG_CONFIG` when you want to return to your real config.
+Unset `drift_CONFIG` when you want to return to your real config.
 
 Default behavior:
 
@@ -112,13 +112,13 @@ The indexer supports multiple file types with specialized extraction:
 Run the indexer:
 
 ```bash
-fileorg index
+drift index
 ```
 
 To rebuild from scratch:
 
 ```bash
-fileorg index --full
+drift index --full
 ```
 
 The indexer will:
@@ -133,15 +133,15 @@ The indexer will:
 
 Data storage:
 
-- Vectors: `~/Library/Application Support/FileOrg/chroma/`
-- Metadata: `~/Library/Application Support/FileOrg/metadata.sqlite3`
+- Vectors: `~/Library/Application Support/drift/chroma/`
+- Metadata: `~/Library/Application Support/drift/metadata.sqlite3`
 
 ### Search
 
 Semantic search over indexed files:
 
 ```bash
-fileorg search "find my tax receipts" [--limit 5]
+drift search "find my tax receipts" [--limit 5]
 ```
 
 ### Chat
@@ -149,10 +149,10 @@ fileorg search "find my tax receipts" [--limit 5]
 Interactive GPT-4o powered chat interface:
 
 ```bash
-fileorg chat
+drift chat
 ```
 
-Shortcut: running `fileorg` with no arguments also launches chat.
+Shortcut: running `drift` with no arguments also launches chat.
 
 **Available Chat Tools:**
 
@@ -179,7 +179,7 @@ Type `exit` or `quit` to end the chat session.
 Run structure analysis directly from the command line:
 
 ```bash
-fileorg structure [--min-cluster-size 3] [--min-samples 2]
+drift structure [--min-cluster-size 3] [--min-samples 2]
 ```
 
 This runs the `suggest_structure` tool and displays the proposed folder tree.
@@ -189,19 +189,19 @@ This runs the `suggest_structure` tool and displays the proposed folder tree.
 Undo the most recent applied move plan:
 
 ```bash
-fileorg undo
+drift undo
 ```
 
 This will show a preview of the undo plan and ask for confirmation before applying.
 
 ### Manual testing checklist
 
-- `fileorg config` creates the config file and shows defaults.
-- `fileorg index` completes without errors and reports counts.
-- `fileorg search "query"` returns relevant files.
-- `fileorg chat` starts and responds to queries.
-- `fileorg structure` generates folder organization suggestions.
-- `fileorg undo` can reverse the last move operation.
+- `drift config` creates the config file and shows defaults.
+- `drift index` completes without errors and reports counts.
+- `drift search "query"` returns relevant files.
+- `drift chat` starts and responds to queries.
+- `drift structure` generates folder organization suggestions.
+- `drift undo` can reverse the last move operation.
 
 ### Troubleshooting
 
