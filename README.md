@@ -1,8 +1,21 @@
-## Drift
+<p align="center">
+  <a href="https://github.com/joshuasoup/file-organizer">
+    <h1 style="font-size: 3em; margin: 0; text-align: center;">Drift</h1>
+  </a>
+</p>
+<p align="center">Organize your files with AI.</p>
+<p align="center">
+  <a href="https://www.python.org/downloads/"><img alt="Python" src="https://img.shields.io/badge/python-3.12+-blue?style=flat-square" /></a>
+</p>
 
-![Demo](demo.gif)
-
-Local-first file indexer + semantic search for macOS.
+<p align="center">
+  <a href="https://github.com/joshuasoup/file-organizer">
+    <img src="terminal.png" alt="Drift Terminal UI" width="49%" />
+  </a>
+  <a href="https://github.com/joshuasoup/file-organizer">
+    <img src="demo.gif" alt="Drift Demo" width="49%" />
+  </a>
+</p>
 
 ### Requirements
 
@@ -35,21 +48,21 @@ export OPENAI_API_KEY="your-api-key-here"
 Generate the default config and inspect it:
 
 ```bash
-drift config
+fileorg config
 ```
 
 Config file location:
 
 ```
-~/Library/Application Support/Drift/config.toml
+~/Library/Application Support/FileOrg/config.toml
 ```
 
 You can override the config location (useful in sandboxes) with environment variables:
 
 ```
-export DRIFT_HOME="/path/to/writable/dir"
+export FILEORG_HOME="/path/to/writable/dir"
 # or
-export DRIFT_CONFIG="/path/to/writable/dir/config.toml"
+export FILEORG_CONFIG="/path/to/writable/dir/config.toml"
 ```
 
 ### Sandbox testing
@@ -58,12 +71,12 @@ Create an isolated sandbox with sample files (all left unsorted at root) and its
 
 ```bash
 python scripts/setup_sandbox.py            # or: python scripts/setup_sandbox.py /tmp/my-sandbox
-export DRIFT_CONFIG=$(pwd)/.sandbox_drift/config.toml  # path printed by the script
-drift index --full
-drift chat   # try search/structure too
+export FILEORG_CONFIG=$(pwd)/.sandbox_fileorg/config.toml  # path printed by the script
+fileorg index --full
+fileorg chat   # try search/structure too
 ```
 
-Unset `DRIFT_CONFIG` when you want to return to your real config.
+Unset `FILEORG_CONFIG` when you want to return to your real config.
 
 Default behavior:
 
@@ -99,13 +112,13 @@ The indexer supports multiple file types with specialized extraction:
 Run the indexer:
 
 ```bash
-drift index
+fileorg index
 ```
 
 To rebuild from scratch:
 
 ```bash
-drift index --full
+fileorg index --full
 ```
 
 The indexer will:
@@ -120,15 +133,15 @@ The indexer will:
 
 Data storage:
 
-- Vectors: `~/Library/Application Support/Drift/chroma/`
-- Metadata: `~/Library/Application Support/Drift/metadata.sqlite3`
+- Vectors: `~/Library/Application Support/FileOrg/chroma/`
+- Metadata: `~/Library/Application Support/FileOrg/metadata.sqlite3`
 
 ### Search
 
 Semantic search over indexed files:
 
 ```bash
-drift search "find my tax receipts" [--limit 5]
+fileorg search "find my tax receipts" [--limit 5]
 ```
 
 ### Chat
@@ -136,10 +149,10 @@ drift search "find my tax receipts" [--limit 5]
 Interactive GPT-4o powered chat interface:
 
 ```bash
-drift chat
+fileorg chat
 ```
 
-Shortcut: running `drift` with no arguments also launches chat.
+Shortcut: running `fileorg` with no arguments also launches chat.
 
 **Available Chat Tools:**
 
@@ -166,7 +179,7 @@ Type `exit` or `quit` to end the chat session.
 Run structure analysis directly from the command line:
 
 ```bash
-drift structure [--min-cluster-size 3] [--min-samples 2]
+fileorg structure [--min-cluster-size 3] [--min-samples 2]
 ```
 
 This runs the `suggest_structure` tool and displays the proposed folder tree.
@@ -176,19 +189,19 @@ This runs the `suggest_structure` tool and displays the proposed folder tree.
 Undo the most recent applied move plan:
 
 ```bash
-drift undo
+fileorg undo
 ```
 
 This will show a preview of the undo plan and ask for confirmation before applying.
 
 ### Manual testing checklist
 
-- `drift config` creates the config file and shows defaults.
-- `drift index` completes without errors and reports counts.
-- `drift search "query"` returns relevant files.
-- `drift chat` starts and responds to queries.
-- `drift structure` generates folder organization suggestions.
-- `drift undo` can reverse the last move operation.
+- `fileorg config` creates the config file and shows defaults.
+- `fileorg index` completes without errors and reports counts.
+- `fileorg search "query"` returns relevant files.
+- `fileorg chat` starts and responds to queries.
+- `fileorg structure` generates folder organization suggestions.
+- `fileorg undo` can reverse the last move operation.
 
 ### Troubleshooting
 
