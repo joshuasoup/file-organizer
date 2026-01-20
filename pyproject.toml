@@ -3,7 +3,7 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fileorg"
+name = "drift"
 version = "0.1.0"
 description = "Organize your Mac's files with AI"
 authors = [{name = "You", email = "you@example.com"}]
@@ -40,4 +40,4 @@ dev = [
 ]
 
 [project.scripts]
-fileorg = "fileorg.__main__:main"
+drift = "drift.__main__:main"

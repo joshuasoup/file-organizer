@@ -1,0 +1,31 @@
+Metadata-Version: 2.4
+Name: drift
+Version: 0.1.0
+Summary: Organize your Mac's files with AI
+Author-email: You <you@example.com>
+Requires-Python: >=3.12
+Requires-Dist: typer[all]==0.9.0
+Requires-Dist: click==8.1.7
+Requires-Dist: rich>=13.7.0
+Requires-Dist: textual>=0.57.1
+Requires-Dist: numpy<2.0.0
+Requires-Dist: httpx<0.28.0
+Requires-Dist: chromadb==0.5.0
+Requires-Dist: openai==1.14.0
+Requires-Dist: pydantic>=2.7.0
+Requires-Dist: pdfplumber==0.10.3
+Requires-Dist: python-docx==0.8.11
+Requires-Dist: pillow>=10.3.0
+Requires-Dist: python-dotenv==1.0.0
+Requires-Dist: pyyaml>=6.0.1
+Requires-Dist: sentence-transformers>=2.2.0
+Requires-Dist: transformers>=4.35.0
+Requires-Dist: torch>=2.0.0
+Requires-Dist: open_clip_torch>=0.17.0
+Requires-Dist: GitPython>=3.1.30
+Requires-Dist: hdbscan>=0.8.33
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: black>=23.12.0; extra == "dev"
+Requires-Dist: flake8>=6.1.0; extra == "dev"
+Requires-Dist: mypy>=1.7.0; extra == "dev"
