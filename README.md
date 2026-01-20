@@ -1,5 +1,10 @@
 <p align="center">
   <a href="https://github.com/joshuasoup/file-organizer">
+    <img src="banner.jpg" alt="Drift Banner" width="20%%">
+  </a>
+</p>
+<p align="center">
+  <a href="https://github.com/joshuasoup/file-organizer">
     <style="font-size: 80px; margin: 0; text-align: center;">Drift</a>
   </a>
 </p>
@@ -8,14 +13,14 @@
   <a href="https://www.python.org/downloads/"><img alt="Python" src="https://img.shields.io/badge/python-3.12+-blue?style=flat-square" /></a>
 </p>
 
-<p align="center">
+<!-- <p align="center">
   <a href="https://github.com/joshuasoup/file-organizer">
     <img src="terminal.png" alt="Drift Terminal UI" width="49%" />
   </a>
   <a href="https://github.com/joshuasoup/file-organizer">
     <img src="demo.gif" alt="Drift Demo" width="49%" />
   </a>
-</p>
+</p> -->
 
 ### Requirements
 
